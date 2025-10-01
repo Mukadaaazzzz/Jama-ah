@@ -5,21 +5,6 @@ import { requireAuth } from "../middleware/auth.js";
 
 const r = Router();
 
-// Helper to create user-scoped client
-function getUserSupabase(userToken) {
-  return createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_ANON_KEY,
-    {
-      global: {
-        headers: {
-          Authorization: `Bearer ${userToken}`
-        }
-      }
-    }
-  );
-}
-
 /** Create room (auth required) */
 r.post("/", requireAuth, async (req, res) => {
   try {
@@ -34,11 +19,21 @@ r.post("/", requireAuth, async (req, res) => {
     const surahNum = Number(surah ?? 1);
     const ayahNum = Number(ayah ?? 1);
 
-    // Get user token from request
-    const token = req.headers.authorization?.replace('Bearer ', '');
-    const userSupabase = getUserSupabase(token);
+    // Create Supabase client with USER's token (not service_role)
+    const userSupabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY,
+      {
+        global: {
+          headers: {
+            Authorization: `Bearer ${req.userToken}`
+          }
+        }
+      }
+    );
 
-    // Now all queries run with user's JWT context
+    console.log('🏠 Creating room for user:', owner_id);
+
     const { data: room, error: e1 } = await userSupabase
       .from("rooms")
       .insert({ owner_id, title: title.trim(), is_live: true })
@@ -50,6 +45,8 @@ r.post("/", requireAuth, async (req, res) => {
       return res.status(400).json({ error: e1.message });
     }
 
+    console.log('✅ Room created:', room.id);
+
     const { error: e2 } = await userSupabase
       .from("room_members")
       .insert({ room_id: room.id, user_id: owner_id, role: "host" });
@@ -58,6 +55,8 @@ r.post("/", requireAuth, async (req, res) => {
       console.error('❌ Room member insert error:', e2);
       return res.status(400).json({ error: e2.message });
     }
+
+    console.log('✅ Room member created');
 
     const { error: e3 } = await userSupabase
       .from("playback_state")
@@ -77,6 +76,7 @@ r.post("/", requireAuth, async (req, res) => {
       return res.status(400).json({ error: e3.message });
     }
 
+    console.log('✅ Playback state created');
     res.json(room);
   } catch (e) {
     console.error('❌ Room creation exception:', e);
@@ -94,7 +94,7 @@ r.get("/", async (_req, res) => {
     .select("*")
     .eq("is_live", true)
     .order("created_at", { ascending: false });
-  if (error) return res.status(400).json({ error });
+  if (error) return res.status(400).json({ error: error.message });
   res.json(data);
 });
 

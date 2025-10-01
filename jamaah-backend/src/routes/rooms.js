@@ -1,16 +1,27 @@
+// src/routes/rooms.js
 import { Router } from "express";
 import { supabase } from "../supabase.js";
+import { requireAuth } from "../middleware/auth.js";
 
 const r = Router();
 
-/** Create a room + host membership + initial playback state */
-r.post("/", async (req, res) => {
+/** Create room (auth required) */
+r.post("/", requireAuth, async (req, res) => {
   try {
-    const { owner_id, title, reciter, surah, ayah, media_url } = req.body;
+    const { title, reciter, surah, ayah, media_url } = req.body;
+
+    if (!title || typeof title !== "string" || title.trim().length < 2) {
+      return res.status(400).json({ error: "title (min 2 chars) required" });
+    }
+
+    const owner_id = req.user.id;                 // ← from JWT
+    const reciterId = String(reciter ?? "3");     // default Sudais
+    const surahNum  = Number(surah ?? 1);
+    const ayahNum   = Number(ayah ?? 1);
 
     const { data: room, error: e1 } = await supabase
       .from("rooms")
-      .insert({ owner_id, title })
+      .insert({ owner_id, title: title.trim(), is_live: true })
       .select()
       .single();
     if (e1) return res.status(400).json({ error: e1 });
@@ -24,12 +35,13 @@ r.post("/", async (req, res) => {
       .from("playback_state")
       .insert({
         room_id: room.id,
-        reciter: String(reciter),
-        surah: Number(surah),
-        ayah: Number(ayah || 1),
-        media_url,
+        reciter: reciterId,
+        surah: surahNum,
+        ayah: ayahNum,
+        media_url: media_url || null,
         is_playing: false,
-        last_seek_seconds: 0
+        last_seek_seconds: 0,
+        host_sent_at: new Date().toISOString()
       });
     if (e3) return res.status(400).json({ error: e3 });
 

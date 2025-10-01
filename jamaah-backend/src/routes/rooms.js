@@ -5,6 +5,20 @@ import { requireAuth } from "../middleware/auth.js";
 
 const r = Router();
 
+// Helper to create user-scoped Supabase client
+function createUserClient(userToken) {
+  return createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_ANON_KEY,
+    {
+      global: {
+        headers: { Authorization: `Bearer ${userToken}` }
+      },
+      auth: { persistSession: false }
+    }
+  );
+}
+
 /** Create room (auth required) */
 r.post("/", requireAuth, async (req, res) => {
   try {
@@ -19,20 +33,8 @@ r.post("/", requireAuth, async (req, res) => {
     const surahNum = Number(surah ?? 1);
     const ayahNum = Number(ayah ?? 1);
 
-    // Create Supabase client with USER's token (not service_role)
-    const userSupabase = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_ANON_KEY,
-      {
-        global: {
-          headers: {
-            Authorization: `Bearer ${req.userToken}`
-          }
-        }
-      }
-    );
-
-    console.log('🏠 Creating room for user:', owner_id);
+    // Create client with user's JWT
+    const userSupabase = createUserClient(req.userToken);
 
     const { data: room, error: e1 } = await userSupabase
       .from("rooms")
@@ -40,23 +42,13 @@ r.post("/", requireAuth, async (req, res) => {
       .select()
       .single();
     
-    if (e1) {
-      console.error('❌ Room insert error:', e1);
-      return res.status(400).json({ error: e1.message });
-    }
-
-    console.log('✅ Room created:', room.id);
+    if (e1) return res.status(400).json({ error: e1.message });
 
     const { error: e2 } = await userSupabase
       .from("room_members")
       .insert({ room_id: room.id, user_id: owner_id, role: "host" });
     
-    if (e2) {
-      console.error('❌ Room member insert error:', e2);
-      return res.status(400).json({ error: e2.message });
-    }
-
-    console.log('✅ Room member created');
+    if (e2) return res.status(400).json({ error: e2.message });
 
     const { error: e3 } = await userSupabase
       .from("playback_state")
@@ -71,29 +63,27 @@ r.post("/", requireAuth, async (req, res) => {
         host_sent_at: new Date().toISOString()
       });
     
-    if (e3) {
-      console.error('❌ Playback state insert error:', e3);
-      return res.status(400).json({ error: e3.message });
-    }
+    if (e3) return res.status(400).json({ error: e3.message });
 
-    console.log('✅ Playback state created');
     res.json(room);
   } catch (e) {
-    console.error('❌ Room creation exception:', e);
     res.status(500).json({ error: String(e.message || e) });
   }
 });
 
 /** List live rooms */
 r.get("/", async (_req, res) => {
-  const { createClient } = await import("@supabase/supabase-js");
-  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+  const supabase = createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_ANON_KEY
+  );
   
   const { data, error } = await supabase
     .from("rooms")
     .select("*")
     .eq("is_live", true)
     .order("created_at", { ascending: false });
+  
   if (error) return res.status(400).json({ error: error.message });
   res.json(data);
 });

@@ -4,6 +4,7 @@ import cors from "cors";
 import morgan from "morgan";
 import rateLimit from "express-rate-limit";
 import http from "http";
+import auth from "./routes/auth.js";
 import { initRealtime } from "./realtime/socket.js";
 
 import rooms from "./routes/rooms.js";
@@ -17,6 +18,7 @@ app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 app.use(morgan("dev"));
 app.use(rateLimit({ windowMs: 60_000, max: 120 }));
+app.use("/auth", auth);
 
 app.get("/", (_req, res) => res.json({ ok: true, name: "Jama'ah API" }));
 app.get("/health", (_req, res) => res.json({ ok: true, uptime: process.uptime() }));
